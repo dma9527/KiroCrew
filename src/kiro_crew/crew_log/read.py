@@ -387,8 +387,9 @@ _PROJECTED_LOCK: Final = threading.Lock()
 def _projected_view() -> "DispatchView | None":
     """The dispatch view folded from the in-memory session tree, or ``None``.
 
-    ``None`` when the projection is not seeded for the store configured now; the
-    caller then scans, which is the cold path this replaces on every later request.
+    Seeds the projection on first use when nothing else has, so the store is scanned
+    once per process, not once per request. ``None`` only when that seed failed (its
+    empty stand-in); the caller then scans.
     A hit costs one identity compare: the projection hands out the SAME ``nodes``
     object until a unit is opened, adopted, released or removed, and only then is
     the view folded again, once, from the records it holds.
@@ -403,6 +404,11 @@ def _projected_view() -> "DispatchView | None":
     from kiro_crew.crew_log.session_tree_projection import projection
 
     tree = projection()
+    if not tree.seeded_for_current_store:
+        # Seed it here rather than scan per request: the seed is the one cold scan
+        # (or a checkpoint load plus its tail), idempotent and serialized, so every
+        # later request is the identity compare below instead of a store scan.
+        tree.ensure_seeded()
     if not tree.seeded_for_current_store or tree.seed_given_up:
         # Unseeded, or a failed seed's empty stand-in: an empty tree would refuse
         # every grandchild, so this request scans as it did before.
