@@ -79,9 +79,11 @@ def lineage_store() -> None:
         _unit(f"acp-other-{index}", f"chat-other-{index}")
 
 
-def test_a_dispatch_view_for_one_unit_reads_no_unit_once_the_tree_is_seeded(
+def test_a_dispatch_view_for_one_unit_reads_only_the_named_unit_once_the_tree_is_seeded(
     lineage_store, monkeypatch
 ):
+    """One read: the named unit, re-read so a held record whose bytes are gone cannot
+    grant. It is also the only record citing chat-child's creator, so it is read once."""
     from kiro_crew.crew_log.read import dispatch_view
 
     session_tree_projection.projection().ensure_seeded()
@@ -89,20 +91,24 @@ def test_a_dispatch_view_for_one_unit_reads_no_unit_once_the_tree_is_seeded(
     view = dispatch_view(("acp-child",))
     assert view.dispatched_by("acp-child", "chat-lead")
     assert not view.dispatched_by("acp-other-3", "chat-lead")
-    assert (meter.reads, meter.listings) == (0, 0)
-    # A second request is a cache hit on the same fold.
+    assert (meter.reads, meter.listings) == (1, 0)
+    # A second request is a cache hit on the same fold, plus the same one re-read.
     assert dispatch_view(("acp-child",)) is view
-    assert (meter.reads, meter.listings) == (0, 0)
+    assert (meter.reads, meter.listings) == (2, 0)
 
 
-def test_a_dispatch_view_before_the_tree_is_seeded_still_scans(lineage_store, monkeypatch):
-    """The cold path is the old scan, unchanged: right answer, store-sized cost."""
+def test_a_dispatch_view_before_the_tree_is_seeded_seeds_it_once(lineage_store, monkeypatch):
+    """The cold path seeds the projection (a store-sized scan, once); the next request
+    reads only the named unit."""
     from kiro_crew.crew_log.read import dispatch_view
 
     meter = _TreeMeter(monkeypatch)
     view = dispatch_view(("acp-child",))
     assert view.dispatched_by("acp-child", "chat-lead")
     assert meter.reads >= OTHER_UNITS
+    meter.reset()
+    assert dispatch_view(("acp-child",)).dispatched_by("acp-child", "chat-lead")
+    assert (meter.reads, meter.listings) == (1, 0)
 
 
 def test_a_unit_opened_after_the_seed_is_visible_without_a_scan(lineage_store, monkeypatch):
@@ -115,7 +121,9 @@ def test_a_unit_opened_after_the_seed_is_visible_without_a_scan(lineage_store, m
     meter = _TreeMeter(monkeypatch)
     view = dispatch_view(("acp-new",))
     assert view.dispatched_by("acp-new", "chat-lead")
-    assert (meter.reads, meter.listings) == (0, 0)
+    # One re-read of the named unit: the emitter's record carries no previous_edge
+    # or header clock, and it still matches the log on the fields the fence uses.
+    assert (meter.reads, meter.listings) == (1, 0)
 
 
 def test_a_named_unit_the_projection_never_saw_is_answered_by_the_scan(lineage_store, monkeypatch):
@@ -220,6 +228,27 @@ def test_a_seed_that_missed_a_faulted_head_is_not_used_for_dispatch(lineage_stor
     assert not view.dispatched_by("acp-other-1", "chat-lead")
 
 
+def test_a_held_creator_citation_whose_bytes_are_gone_does_not_grant(lineage_store):
+    """A -> B -> C. The projection still holds B citing A (as a checkpoint written
+    before a partial removal would), but B's log on disk no longer carries that
+    citation. The grant re-reads B, sees the change, and takes the scan, which
+    refuses A reading C -- the answer a fresh process gives."""
+    from kiro_crew.crew_log import read as crew_log_read
+    from kiro_crew.crew_log.read import dispatch_view
+
+    _unit("acp-grand", "chat-grand", parent="chat-child")
+    session_tree_projection.projection().ensure_seeded()
+    assert dispatch_view(("acp-grand",)).dispatched_by("acp-grand", "chat-lead")
+    child_log = lg.crew_log_path(lg.KIND_SESSION, "acp-child")
+    lines = child_log.read_bytes().split(b"\n")
+    lines[1] = b'{"not": "an entry"}'
+    child_log.write_bytes(b"\n".join(lines))
+    crew_log_read._TREE._heads.clear()
+    assert session_tree_projection.projection().reading().records  # still held
+    view = dispatch_view(("acp-grand",))
+    assert not view.dispatched_by("acp-grand", "chat-lead")
+
+
 def test_a_scoped_listing_sees_a_child_log_the_projection_never_held(lineage_store):
     """The scoped listing walks the store root and takes its lineage from the scan,
     so a dispatched child written outside this process's emitter is listed."""
@@ -250,7 +279,7 @@ def test_one_reconcile_fault_then_a_clean_read_returns_to_the_bounded_path(
 ):
     """A decision re-read that faults once marks the tree incomplete, so dispatch
     scans; the next clean re-read of the same unit takes the fault back out, and
-    dispatch is served from the projection again with no unit read."""
+    dispatch is served from the projection again, reading only the named unit."""
     from kiro_crew.crew_log import store as crew_store
     from kiro_crew.crew_log.read import dispatch_view
 
@@ -279,7 +308,7 @@ def test_one_reconcile_fault_then_a_clean_read_returns_to_the_bounded_path(
     assert not proj.reading().incomplete
     meter.reset()
     assert dispatch_view(("acp-child",)).dispatched_by("acp-child", "chat-lead")
-    assert (meter.reads, meter.listings) == (0, 0)
+    assert (meter.reads, meter.listings) == (1, 0)  # the named unit's re-read only
 
 
 def test_forgetting_a_unit_drops_its_reconcile_fault(lineage_store, monkeypatch):
