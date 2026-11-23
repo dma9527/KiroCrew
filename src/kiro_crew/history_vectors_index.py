@@ -38,6 +38,13 @@ class Tokenizer(NamedTuple):
     signature: str
 
 
+#: The rows a chunk is cut from: the ones ``search_chat_history`` and
+#: ``get_chat_session`` show, so no meaning excerpt can come from a tool or system row.
+CHUNK_ROLES = frozenset({"user", "assistant"})
+#: Part of the chunker signature: a change re-chunks every session.
+_CHUNK_RULE = "dialogue"
+
+
 def vector_store_for(sessions_dir: Path) -> SessionVectorStore:
     return SessionVectorStore(Path(sessions_dir) / ".index" / VECTORS_FILENAME)
 
@@ -87,7 +94,7 @@ def _signature_for(path: Path | None) -> str:
         st = path.stat()
     except OSError:
         return ""
-    return f"{path.name}:{st.st_size}:{st.st_mtime_ns}:{CHUNK_TOKENS}"
+    return f"{path.name}:{st.st_size}:{st.st_mtime_ns}:{CHUNK_TOKENS}:{_CHUNK_RULE}"
 
 
 def tokenizer_signature() -> str:
@@ -162,7 +169,7 @@ def chunk_session(
                 store.drop([key])
                 return WITHHELD
             try:
-                texts = list(log._iter_message_texts(key))
+                texts = list(log._iter_message_texts(key, roles=CHUNK_ROLES))
             except OSError:
                 return RETRY
             chunks = chunk_messages(texts, tokenizer.count_tokens)
