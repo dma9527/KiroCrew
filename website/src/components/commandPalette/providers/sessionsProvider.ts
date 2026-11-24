@@ -72,8 +72,12 @@ export interface SessionSearchItem {
   created?: string
   modified?: number
   agent?: string
-  /** Match-centered content snippet, present when the hit was in the body. */
+  /** Match-centered content snippet, present when the hit was in the body. For a
+   *  `meaning` row it is the matched passage, which need not hold the query. */
   snippet?: string
+  /** How the row matched, when meaning search answered (`session.semantic_search`);
+   *  absent reads as a text match, as a peer on an older build sends it. */
+  match?: 'text' | 'meaning'
   /** Folder the session is filed under, when any (maps to a chip in the row). */
   folder_id?: string
   memory_mode?: 'persistent' | 'incognito' | 'temporary'
@@ -195,12 +199,15 @@ export function createSessionsProvider(deps: SessionsProviderDeps): ResourceProv
         // owning instance's raw name so identical titles from two gateways are
         // distinguishable at a glance.
         const snippet = s.snippet?.trim()
+        // Found by meaning: the passage need not hold the query, so it gets no
+        // highlight, and the row says why it is here.
+        const related = s.match === 'meaning'
         // An untitled row's name no longer says which session it is, so with
         // no snippet its key leads the subtitle: it tells two untitled hits
         // apart and shows a key search why it matched.
         const keyLine = !snippet && label !== title ? s.key : undefined
         const subSource = snippet || keyLine
-        const subIdx = subSource ? substringIndices(q, subSource) : undefined
+        const subIdx = subSource && !(related && subSource === snippet) ? substringIndices(q, subSource) : undefined
         const baseSubtitle = keyLine
           ? [keyLine, s.agent].filter(Boolean).join(' · ')
           : snippet || s.agent || undefined
@@ -231,6 +238,7 @@ export function createSessionsProvider(deps: SessionsProviderDeps): ResourceProv
           subtitle,
           subtitleIndices: shiftedIdx,
           folder: folderName(s.folder_id),
+          badge: related ? i18nT('pages.chatSidebar.search_related') : undefined,
           icon: sessionIcon(),
           score: match ? match.score : 0,
           indices: shownMatch ? shownMatch.indices : [],

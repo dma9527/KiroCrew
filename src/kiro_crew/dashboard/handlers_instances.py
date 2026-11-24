@@ -73,7 +73,7 @@ from kiro_crew.dashboard.session_transfer import (
 from kiro_crew.dashboard.slot_ownership import app_owns_slot_session
 from kiro_crew.dashboard.state import MAX_LIVE_SLOTS  # noqa: F401
 from kiro_crew.history import SEARCH_MIN_CHARS
-from kiro_crew.history_search import search_coverage
+from kiro_crew.history_search import search_coverage, semantic_coverage
 from kiro_crew.instances.constants import (  # noqa: F401
     PEER_SLOTS_REPLY_MAX_BYTES,
     PROXY_PATH_MAX_DECODE_PASSES,
@@ -1320,6 +1320,10 @@ async def api_instances_search_sessions(request: web.Request) -> web.Response:
     coverage = search_coverage(local_rows)
     if coverage is not None:
         body["scan"] = {"searched": coverage[0], "total": coverage[1], "scope": "local"}
+    # The same for the meaning index: this machine's only, while it is still built.
+    semantic = semantic_coverage(local_rows)
+    if semantic is not None:
+        body["semantic"] = {"indexed": semantic[0], "eligible": semantic[1], "scope": "local"}
     return web.json_response(body)
 
 

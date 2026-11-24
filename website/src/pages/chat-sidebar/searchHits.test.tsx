@@ -5,9 +5,9 @@
 import type { ReactNode } from 'react'
 import { describe, it, expect } from 'vitest'
 import { render } from '@testing-library/react'
-import { sidebarSearchHits } from './search'
+import { sessionSemanticCoverage, sidebarSearchHits } from './search'
 import { renderedLane } from './lanes'
-import { makeSidebarSearchView, SearchHitTail, SidebarSearchContext } from './searchHits'
+import { makeSidebarSearchView, SearchHitTail, SearchResultsHeader, SidebarSearchContext } from './searchHits'
 import type { Slot } from './types'
 
 const local = (key: string): Slot => ({ key, title: key, running: false }) as Slot
@@ -25,10 +25,40 @@ describe('sidebarSearchHits', () => {
     expect([...hits.snippets]).toEqual([['a', '…the memory store…']])
   })
 
+  it('marks the local keys the search found by meaning, and keeps the coverage', () => {
+    const semantic = { indexed: 3, eligible: 4 }
+    const hits = sidebarSearchHits([
+      { key: 'dashboard_a', snippet: 'a passage', match: 'meaning' },
+      { key: 'b', snippet: 'the query', match: 'text' },
+      { key: 'c' },
+      { key: 'd', match: 'meaning', instance_id: 'inst-a' },
+    ], null, semantic)
+    expect([...hits.related]).toEqual(['a'])
+    expect(hits.semantic).toBe(semantic)
+    expect(sidebarSearchHits([], null).semantic).toBeNull()
+  })
+
   it('drops a remote row, whose key names a session on another gateway', () => {
     const hits = sidebarSearchHits([{ key: 'a', snippet: 'peer text', instance_id: 'inst-a' }], null)
     expect(hits.ranks.size).toBe(0)
     expect(hits.snippets.size).toBe(0)
+  })
+})
+
+describe('sessionSemanticCoverage', () => {
+  it.each([
+    [{ semantic: { indexed: 4, eligible: 4 } }],
+    [{ semantic: { indexed: -1, eligible: 4 } }],
+    [{ semantic: { indexed: 1.5, eligible: 4 } }],
+    [{ semantic: { indexed: '3', eligible: 4 } }],
+    [{ semantic: null }],
+    [null],
+  ])('rejects %j', (d) => {
+    expect(sessionSemanticCoverage(d)).toBeNull()
+  })
+
+  it('reads the counts while the index is incomplete', () => {
+    expect(sessionSemanticCoverage({ semantic: { indexed: 3, eligible: 4, scope: 'local' } })).toEqual({ indexed: 3, eligible: 4 })
   })
 })
 
@@ -78,6 +108,16 @@ describe('SearchHitTail', () => {
     expect(container.querySelector('[data-session-search-snippet] strong')?.textContent).toBe('memory')
   })
 
+  it('labels a meaning row Related and draws its passage with no highlight', () => {
+    // The passage holds the query here, so only the meaning rule keeps it unmarked.
+    const related = makeSidebarSearchView('deploy', new Map([['k', 'the deploy went through the pipeline']]), {}, new Map(), new Set(['k']))
+    const { container, getByTestId } = tail(local('k'), preview, related)
+    expect(getByTestId('session-search-related')).toHaveTextContent('Related')
+    expect(container.querySelector('[data-session-search-snippet]')?.textContent).toBe('the deploy went through the pipeline')
+    expect(container.querySelector('[data-session-search-snippet] strong')).toBeNull()
+    expect(tail(peer('k'), preview, related).container.querySelector('[data-testid="session-search-related"]')).toBeNull()
+  })
+
   it('keeps a state line as the one tail line, drawing no snippet beside it', () => {
     const { queryByTestId, container } = tail(local('k'), state)
     expect(queryByTestId('state')).not.toBeNull()
@@ -91,5 +131,21 @@ describe('SearchHitTail', () => {
     const outside = render(<SearchHitTail slot={local('k')} tail={preview} preview={preview} dot={dot} />)
     expect(outside.container.querySelector('[data-testid="preview"]')).not.toBeNull()
     expect(outside.container.querySelector('[data-session-search-snippet]')).toBeNull()
+  })
+})
+
+describe('SearchResultsHeader', () => {
+  const header = (semantic: { indexed: number; eligible: number } | null, failed = false) => render(
+    <SearchResultsHeader count={2} filtersOn={false} onClearFilters={() => {}} failed={failed} scan={null} semantic={semantic} />,
+  )
+
+  it('says how far the meaning index reaches while it is still built', () => {
+    expect(header({ indexed: 1200, eligible: 1500 }).getByTestId('sidebar-search-semantic-note'))
+      .toHaveTextContent('Meaning search covers 1,200 of 1,500 sessions so far.')
+  })
+
+  it('says nothing about it once complete, or after a failed search', () => {
+    expect(header(null).queryByTestId('sidebar-search-semantic-note')).toBeNull()
+    expect(header({ indexed: 1, eligible: 2 }, true).queryByTestId('sidebar-search-semantic-note')).toBeNull()
   })
 })

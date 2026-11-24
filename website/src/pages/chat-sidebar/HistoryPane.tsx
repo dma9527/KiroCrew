@@ -22,6 +22,8 @@ import { uiLocation } from '../../uiLocations/uiLocation'
 import { agentOrDefaultLabel } from '../../utils/agentLabel'
 import { sessionDisplayTitle } from '../../utils/sessionDisplayTitle'
 import { historyRowIdentity } from './rowIdentity'
+import { isMeaningRow } from './search'
+import { RelatedLabel, SemanticCoverageNote } from './searchHits'
 import { DisclosureChevron, dateSegment } from './chrome'
 import type { SidebarScope } from './scope'
 
@@ -30,7 +32,7 @@ export function renderHistoryPane(shell: SidebarScope): React.ReactNode {
   const { clearClosedSessionsWithConfirm, collapsedHistoryGroups, connected, defaultAgent,
     deleteHistorySessionWithConfirm, dispatch, folderSortMode, allFolders, history, historyDragging,
     historyFilter, historyHasMore, historyHeight, historyOpen, historyResize, historySearchFailed, historySearchResults,
-    historySearchScan, openHistoryPane, selectInstance, setCollapsedHistoryGroups, setHistoryFilter, setHistoryOpen, sortKey: listSortKey,
+    historySearchScan, historySearchSemantic, openHistoryPane, selectInstance, setCollapsedHistoryGroups, setHistoryFilter, setHistoryOpen, sortKey: listSortKey,
     tintAgents } = shell
   // Older sessions have no place in the manual order (it orders the open ones),
   // so under Manual this pane keeps its own newest-first order and date groups.
@@ -242,6 +244,11 @@ export function renderHistoryPane(shell: SidebarScope): React.ReactNode {
                   // hidden — deleteHistorySession would target the LOCAL file.
                   const remoteInstanceId = (s as { instance_id?: string }).instance_id
                   const remoteInstanceName = (s as { instance_name?: string }).instance_name
+                  // Search-only fields, absent on a listed history row.
+                  const searchHit = s as { match?: unknown; snippet?: unknown }
+                  const relatedSnippet = searchActive && isMeaningRow(searchHit)
+                    ? (typeof searchHit.snippet === 'string' ? searchHit.snippet.trim() : '')
+                    : null
                   const activateRow = () => {
                     // A remote row never resumes here, so it can never produce the
                     // unresumable notice above — the pane switch IS its outcome.
@@ -315,6 +322,16 @@ export function renderHistoryPane(shell: SidebarScope): React.ReactNode {
                           {displayDate && <span className="ml-auto text-[11px] text-muted font-normal shrink-0">{displayDate}</span>}
                         </div>
                         <div className="text-[13px] leading-snug line-clamp-2 break-words">{sessionDisplayTitle(s)}</div>
+                        {/* A row the search found by meaning says so, and shows the
+                            passage that matched: its title alone need not explain why
+                            it is here. No highlight, since the passage need not hold the
+                            query (RFC session semantic search 8.2). */}
+                        {relatedSnippet !== null && (
+                          <div className="mt-0.5 text-[11px] text-muted flex items-start gap-1.5 min-w-0" data-testid="history-search-related-row">
+                            <RelatedLabel />
+                            {relatedSnippet && <span className="line-clamp-2 break-words min-w-0">{relatedSnippet}</span>}
+                          </div>
+                        )}
                       </div>
                       {/* Floating hover button group — matches session-row pattern.
                           Hidden for remote rows: deleteHistorySession targets the
@@ -386,6 +403,13 @@ export function renderHistoryPane(shell: SidebarScope): React.ReactNode {
                     total: fmtNumber(historySearchScan.total),
                   })}
                 </div>
+              )}
+              {historySearchResults && historyFilter.trim().length >= SEARCH_MIN_CHARS && (
+                <SemanticCoverageNote
+                  semantic={historySearchSemantic}
+                  className="px-3 pt-1 pb-1 text-[11px] text-muted text-center"
+                  testId="history-search-semantic-note"
+                />
               )}
               {/* Load-more uses onMouseDown+preventDefault to trigger without stealing
                   focus from the transcript; scope-disable the static-interaction rule. */}

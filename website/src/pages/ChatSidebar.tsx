@@ -223,7 +223,7 @@ function ChatSidebar({
     [localSlots],
   )
   const {
-    historySearchResults, historySearchFailed, historySearchScan, instancesList, instanceSessions, remoteSessionsError,
+    historySearchResults, historySearchFailed, historySearchScan, historySearchSemantic, instancesList, instanceSessions, remoteSessionsError,
     allRows, allLiveSlots, selectInstance, crewGroups,
   } = useSessionSources({ historyFilter, slotTitleDigest, localSlots })
   // Whether any row renders a runs-elsewhere chip, i.e. whether this sidebar
@@ -693,10 +693,12 @@ function ChatSidebar({
   }, [searchLaneActive, searchQuery])
   // What a search-lane row shows: its snippet and its folder (./chat-sidebar/searchHits).
   const searchSnippets = slotSearch?.snippets
+  const searchRelated = slotSearch?.related
   const searchView = useMemo(() => (searchLaneActive
     ? makeSidebarSearchView(slotFilter, searchSnippets, slotFolders,
-      new Map(orderFoldersWithPaths(folders, folderSortMode).map(o => [o.folder.id, typeof o.path === 'string' ? o.path : folderNameText(o.folder)])))
-    : null), [searchLaneActive, slotFilter, searchSnippets, slotFolders, folders, folderSortMode])
+      new Map(orderFoldersWithPaths(folders, folderSortMode).map(o => [o.folder.id, typeof o.path === 'string' ? o.path : folderNameText(o.folder)])),
+      searchRelated)
+    : null), [searchLaneActive, slotFilter, searchSnippets, slotFolders, folders, folderSortMode, searchRelated])
 
   useHoverPinLiveness({ hoverPinRef, releaseHoverPin, filteredSlots: laneSlots, boardLaneActive, flatLaneActive, conductorLaneActive, orderedColumns })
 
@@ -1013,6 +1015,7 @@ function ChatSidebar({
         onClearFilters={() => { clearAllFilters(); clearHiddenFilters(); clearTagFilter(); clearModelFilter(); clearCreators() }}
         failed={slotSearchFailed}
         scan={slotSearch?.scan ?? null}
+        semantic={slotSearch?.semantic ?? null}
       />
       <SearchFolderHits
         folders={folders} sortMode={folderSortMode} query={slotFilter} matchIds={folderNameMatchIds} isFolderHidden={isFolderHidden}
@@ -1045,7 +1048,7 @@ function ChatSidebar({
     handleSidebarDragOver, handleSidebarDragStart, hasRemoteExecutedRow, heldDisplacedRef, heldLane,
     hiddenByContainer, hiddenFilters, hiddenFolderCount, hideEmptyFolderBody, hideEmptyFolders, history, historyDragging,
     historyFilter, historyHasMore, historyHeight, historyOpen, historyResize, historySearchFailed, historySearchResults,
-    historySearchScan, hoverPinRef, ime, installedAgents, instanceSessions, instantCloseId, isActiveRow, isFolderFilteredOut,
+    historySearchScan, historySearchSemantic, hoverPinRef, ime, installedAgents, instanceSessions, instantCloseId, isActiveRow, isFolderFilteredOut,
     isFolderHidden, isMobile, isStaleExempt, lane, laneRowWindow, laneScrollMemory, laneSlots,
     laneSwitchLabel, lineage, listNarrowed, localSlots, missingLanes, modelFilterInverted, modelFilterRows,
     moveByDrag, moveFolderTo, nativeSessionDrag, navigate, newChatError, newChatMenuOpen, nextLane, prStatusRefreshError,

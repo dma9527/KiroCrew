@@ -63,6 +63,10 @@ export interface Result {
   pinned?: boolean
   /** Folder name the session is filed under (recents view), shown as a chip. */
   folder?: string
+  /** A short marker chip beside the title in the search view, e.g. "Related" on a
+   *  session found by meaning rather than by the query's words. Display text,
+   *  already localised. */
+  badge?: string
   /** True for a new/empty session row — rendered with a "+" marker. */
   isNew?: boolean
   /**

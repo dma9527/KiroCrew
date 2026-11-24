@@ -844,6 +844,11 @@ export default function CommandPalette({
                               <span className="truncate">
                                 <Highlighted text={r.title} indices={r.indices} />
                               </span>
+                              {r.badge && (
+                                <span className="shrink-0 inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium text-muted bg-bg-hover" data-testid="palette-result-badge">
+                                  {r.badge}
+                                </span>
+                              )}
                               {r.folder && (
                                 <span className="shrink-0 inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-normal text-muted bg-bg-hover">
                                   {r.folder}

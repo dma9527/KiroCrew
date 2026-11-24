@@ -24,6 +24,32 @@ export function sessionSearchScan(d: unknown): SessionSearchScan | null {
   return s >= 0 && s < t ? { searched: s, total: t, local: scan.scope === 'local' } : null
 }
 
+/** How much of the meaning index a search read, present only while it is still
+ *  being built (`session.semantic_search`): of the `eligible` visible sessions in the
+ *  scan window, how many are embedded. A missing hit may still arrive. */
+export interface SessionSemanticCoverage { indexed: number; eligible: number }
+
+/** The response's `semantic`, or `null` when it is absent or not two sane counts. */
+export function sessionSemanticCoverage(d: unknown): SessionSemanticCoverage | null {
+  const semantic = (d as { semantic?: unknown } | null | undefined)?.semantic as
+    | { indexed?: unknown; eligible?: unknown }
+    | undefined
+  if (!semantic || typeof semantic !== 'object') return null
+  const { indexed, eligible } = semantic
+  if (!Number.isSafeInteger(indexed) || !Number.isSafeInteger(eligible)) return null
+  const i = indexed as number
+  const e = eligible as number
+  return i >= 0 && i < e ? { indexed: i, eligible: e } : null
+}
+
+/** Whether a search row was found by meaning: the vector leg returned it and the
+ *  query's words need not occur in it, so its snippet is the matched passage and
+ *  carries no highlight. A row without `match` (a peer on an older build) is a
+ *  text match. */
+export function isMeaningRow(row: { match?: unknown }): boolean {
+  return row.match === 'meaning'
+}
+
 /** What the sidebar keeps from one session-search reply. `ranks` is the backend
  *  relevance rank per local slot key (0 = best); `snippets` is the match-centred
  *  text the server returned for a hit, already redacted there. Both are keyed by
@@ -31,7 +57,10 @@ export function sessionSearchScan(d: unknown): SessionSearchScan | null {
 export interface SidebarSearchHits {
   ranks: Map<string, number>
   snippets: Map<string, string>
+  /** Local keys whose hit was found by meaning (see {@link isMeaningRow}). */
+  related: Set<string>
   scan: SessionSearchScan | null
+  semantic: SessionSemanticCoverage | null
 }
 
 /** One reply's rows as {@link SidebarSearchHits}. First wins on a canonical-key
@@ -39,11 +68,13 @@ export interface SidebarSearchHits {
  *  its snippet. A remote row (`instance_id`) names a session on another gateway and
  *  is skipped: its key is not a local key. */
 export function sidebarSearchHits(
-  sessions: { key: string; snippet?: unknown; instance_id?: string }[],
+  sessions: { key: string; snippet?: unknown; match?: unknown; instance_id?: string }[],
   scan: SessionSearchScan | null,
+  semantic: SessionSemanticCoverage | null = null,
 ): SidebarSearchHits {
   const ranks = new Map<string, number>()
   const snippets = new Map<string, string>()
+  const related = new Set<string>()
   sessions.forEach((s, i) => {
     if (s.instance_id) return
     const key = s.key.replace(/^dashboard_/, '')
@@ -51,8 +82,9 @@ export function sidebarSearchHits(
     ranks.set(key, i)
     const snippet = typeof s.snippet === 'string' ? s.snippet.trim() : ''
     if (snippet) snippets.set(key, snippet)
+    if (isMeaningRow(s)) related.add(key)
   })
-  return { ranks, snippets, scan }
+  return { ranks, snippets, related, scan, semantic }
 }
 
 /**
@@ -68,7 +100,8 @@ export function sidebarSearchHits(
  *
  * `transform` also receives the response's scan-window note
  * (see {@link sessionSearchScan}), so a caller can say when older sessions were
- * not searched.
+ * not searched, and its meaning-index coverage (see {@link sessionSemanticCoverage}),
+ * so it can say while that index is still being built.
  */
 export function useDebouncedSessionSearch<T>(
   query: string,
@@ -79,7 +112,7 @@ export function useDebouncedSessionSearch<T>(
   return useDebouncedSessionSearchState(query, transform, revalidateSignal, federated).result
 }
 
-type SessionSearchTransform<T> = (sessions: { key: string; title?: string; snippet?: string; created?: string; modified?: number; agent?: string; memory_mode?: 'persistent' | 'incognito' | 'temporary'; folder_id?: string; instance_id?: string; instance_name?: string }[], scan: SessionSearchScan | null) => T
+type SessionSearchTransform<T> = (sessions: { key: string; title?: string; snippet?: string; match?: 'text' | 'meaning'; created?: string; modified?: number; agent?: string; memory_mode?: 'persistent' | 'incognito' | 'temporary'; folder_id?: string; instance_id?: string; instance_name?: string }[], scan: SessionSearchScan | null, semantic: SessionSemanticCoverage | null) => T
 
 /**
  * `useDebouncedSessionSearch` plus whether the latest search failed.
@@ -143,7 +176,7 @@ export function useDebouncedSessionSearchState<T>(
       try {
         const d = await fetchSessions(q)
         if (cancelled || myToken !== token.current) return
-        setResult(transform(d.sessions || [], sessionSearchScan(d)))
+        setResult(transform(d.sessions || [], sessionSearchScan(d), sessionSemanticCoverage(d)))
       } catch {
         if (cancelled || myToken !== token.current) return
         setFailed()
@@ -176,7 +209,7 @@ export function useDebouncedSessionSearchState<T>(
       try {
         const d = await fetchSessions(q)
         if (cancelled || myToken !== token.current) return
-        setResult(transform(d.sessions || [], sessionSearchScan(d)))
+        setResult(transform(d.sessions || [], sessionSearchScan(d), sessionSemanticCoverage(d)))
       } catch {
         if (cancelled || myToken !== token.current) return
         setFailed()

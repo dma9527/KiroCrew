@@ -16,7 +16,7 @@ import { fmtNumber } from '../../i18n/format'
 import { i18nT } from '../../i18n/t'
 import { cardLineClass, useSessionCardLines } from './cardLines'
 import { isPeerRow } from './rowIdentity'
-import type { SessionSearchScan } from './search'
+import type { SessionSearchScan, SessionSemanticCoverage } from './search'
 import type { Slot } from './types'
 
 /** The active search, as a row reads it. Provided only while the search lane is
@@ -27,6 +27,9 @@ export interface SidebarSearchView {
   /** The server's snippet for this row's hit, or undefined (no hit, a title-only
    *  hit, or a peer row, whose key is not a local key). Never built client-side. */
   snippetOf: (slot: Slot) => string | undefined
+  /** Whether this row's hit was found by meaning, so its snippet is the matched
+   *  passage, need not hold the query's words, and is drawn without a highlight. */
+  isRelated: (slot: Slot) => boolean
   /** The row's folder, as its path, or undefined when it is not filed. */
   folderLabelOf: (slot: Slot) => string | undefined
 }
@@ -39,10 +42,12 @@ export function makeSidebarSearchView(
   snippets: ReadonlyMap<string, string> | undefined,
   folderOf: Readonly<Record<string, string>>,
   folderPaths: ReadonlyMap<string, string>,
+  related?: ReadonlySet<string>,
 ): SidebarSearchView {
   return {
     query: query.trim(),
     snippetOf: slot => (isPeerRow(slot) ? undefined : snippets?.get(slot.key)),
+    isRelated: slot => !isPeerRow(slot) && !!related?.has(slot.key),
     folderLabelOf: slot => {
       if (isPeerRow(slot)) return undefined
       const id = folderOf[slot.key]
@@ -68,12 +73,49 @@ export function SearchHitTail({ slot, tail, preview, dot }: {
   const lines = useSessionCardLines()
   const snippet = search?.snippetOf(slot)
   if (!search || !snippet || tail !== preview) return <>{tail}</>
+  const related = search.isRelated(slot)
   return (
     <div className={`${ROW_STATUS_CLS} text-muted flex items-center gap-1.5 min-w-0${lines.preview > 1 ? ' !items-start' : ''}`}>
       {dot}
+      {related && <RelatedLabel />}
       <span className={`${cardLineClass(lines.preview)} min-w-0`} data-session-search-snippet>
-        <Highlighted text={snippet} indices={substringIndices(search.query, snippet)} />
+        {/* A meaning row's passage need not hold the query, so a highlight would
+            mark stray letters; it is drawn plain. */}
+        {related ? snippet : <Highlighted text={snippet} indices={substringIndices(search.query, snippet)} />}
       </span>
+    </div>
+  )
+}
+
+/** The "Related" chip on a row the search found by meaning rather than by the
+ *  words typed (RFC session semantic search 8.2). Text, so it reads the same in a
+ *  screen reader and with no colour. */
+export function RelatedLabel() {
+  return (
+    <span
+      className="shrink-0 inline-flex items-center rounded px-1 text-[10px] font-medium text-muted bg-bg-hover"
+      title={i18nT('pages.chatSidebar.search_related_hint')}
+      data-testid="session-search-related"
+    >
+      {i18nT('pages.chatSidebar.search_related')}
+    </span>
+  )
+}
+
+/** "Meaning search covers N of M sessions so far.", while the meaning index behind
+ *  a search is still being built, so a missing hit can still arrive. */
+export function SemanticCoverageNote({ semantic, className, testId }: {
+  semantic: SessionSemanticCoverage | null
+  className?: string
+  testId: string
+}) {
+  if (!semantic) return null
+  return (
+    <div className={className} data-testid={testId}>
+      {i18nT('pages.chatSidebar.search_meaning_coverage', {
+        indexed: fmtNumber(semantic.indexed),
+        eligible: fmtNumber(semantic.eligible),
+      })}
     </div>
   )
 }
@@ -199,12 +241,13 @@ export function SearchPendingLine() {
 
 /** The line above the search results: how many rows matched, a way to drop the
  *  filters that may be hiding more (the query stays), and why the list may be short. */
-export function SearchResultsHeader({ count, filtersOn, onClearFilters, failed, scan }: {
+export function SearchResultsHeader({ count, filtersOn, onClearFilters, failed, scan, semantic = null }: {
   count: number
   filtersOn: boolean
   onClearFilters: () => void
   failed: boolean
   scan: SessionSearchScan | null
+  semantic?: SessionSemanticCoverage | null
 }) {
   return (
     <div className="px-3 pt-1 pb-2 text-[11px] text-muted select-none" data-testid="sidebar-search-header">
@@ -235,6 +278,7 @@ export function SearchResultsHeader({ count, filtersOn, onClearFilters, failed, 
           })}
         </div>
       )}
+      {!failed && <SemanticCoverageNote semantic={semantic} className="mt-1" testId="sidebar-search-semantic-note" />}
     </div>
   )
 }

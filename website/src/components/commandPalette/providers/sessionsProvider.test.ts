@@ -118,6 +118,24 @@ describe('createSessionsProvider — result mapping', () => {
     }
   })
 
+  it('labels a meaning hit Related and leaves its passage unhighlighted', async () => {
+    const fetchSessions = vi.fn(
+      async (): Promise<SessionSearchResponse> => ({
+        sessions: [
+          { key: 'm', title: 'Release notes', snippet: 'the deploy went through', match: 'meaning' },
+          { key: 't', title: 'Other', snippet: 'we deploy on fridays', match: 'text' },
+        ],
+      }),
+    )
+    const { d } = deps({ fetchSessions })
+    const [meaning, text] = await createSessionsProvider(d).search('deploy')
+    expect(meaning.badge).toBe('Related')
+    expect(meaning.subtitle).toBe('the deploy went through')
+    expect(meaning.subtitleIndices).toBeUndefined()
+    expect(text.badge).toBeUndefined()
+    expect(text.subtitleIndices?.length).toBeGreaterThan(0)
+  })
+
   it('shows "Untitled session", never the key, for an untitled hit; actions keep the key (#20879)', async () => {
     const fetchSessions = vi.fn(
       async (): Promise<SessionSearchResponse> => ({

@@ -141,6 +141,26 @@ class TestSearchAllEndpoint:
         assert "scan" not in data, "a peer's own scan is never carried"
 
     @pytest.mark.asyncio
+    async def test_reports_this_machines_meaning_coverage_as_local(self, monkeypatch):
+        """While the local meaning index is incomplete the reply says so, marked local."""
+        _enable_instances(monkeypatch)
+
+        class _PartialLog:
+            def search_sessions(self, _q, _limit):
+                return SearchRows([{"key": "l1"}], semantic={"indexed": 3, "eligible": 4})
+
+        mgr = _Mgr({"a": (True, {"sessions": [{"key": "ra1"}], "semantic": {"indexed": 1}})})
+        state = _state([], mgr)
+        state.conversation_log = _PartialLog()
+
+        data = await _json_of(await hi.api_instances_search_sessions(_request(state)))
+        assert data["semantic"] == {"indexed": 3, "eligible": 4, "scope": "local"}
+
+        state.conversation_log = _Log([{"key": "l1"}])
+        data = await _json_of(await hi.api_instances_search_sessions(_request(state)))
+        assert "semantic" not in data, "a peer's own coverage is never carried"
+
+    @pytest.mark.asyncio
     async def test_rank_interleaves_local_first_and_tags_remote_rows(self, monkeypatch):
         """Position k cycles source k-th hits, local source first; remote rows
         carry instance_id + instance_name so the UI can badge and route them."""

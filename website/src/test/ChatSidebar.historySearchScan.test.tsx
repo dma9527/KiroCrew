@@ -178,6 +178,52 @@ describe('ChatSidebar – history search scan-window note', () => {
   })
 })
 
+describe('ChatSidebar – history search by meaning', () => {
+  beforeEach(() => {
+    sessionsSearchMock.mockReset()
+    localStorage.clear()
+  })
+
+  it('labels a meaning row Related with its passage, and a text row not at all', async () => {
+    sessionsSearchMock.mockResolvedValue({
+      sessions: [
+        { key: 'dashboard_chat-8', title: 'Release week', modified: 3_000_000, match: 'meaning', snippet: 'the rollout went through the pipeline' },
+        { key: 'dashboard_chat-9', title: 'Platypus plan', modified: 2_000_000, match: 'text' },
+      ],
+    })
+    renderSidebar()
+    await search('deploy')
+    await screen.findByText('Platypus plan')
+    const rows = screen.getAllByTestId('history-search-related-row')
+    expect(rows).toHaveLength(1)
+    expect(rows[0]).toHaveTextContent('Related')
+    expect(rows[0]).toHaveTextContent('the rollout went through the pipeline')
+  })
+
+  it('says how far the meaning index reaches while it is still built', async () => {
+    sessionsSearchMock.mockResolvedValue({
+      sessions: [{ key: 'dashboard_chat-9', title: 'Platypus plan', modified: 3_000_000 }],
+      semantic: { indexed: 3, eligible: 4 },
+    })
+    renderSidebar()
+    await search('platypus')
+    expect(await screen.findByTestId('history-search-semantic-note')).toHaveTextContent(
+      'Meaning search covers 3 of 4 sessions so far.',
+    )
+  })
+
+  it('says nothing about meaning with meaning search off', async () => {
+    sessionsSearchMock.mockResolvedValue({
+      sessions: [{ key: 'dashboard_chat-9', title: 'Platypus plan', modified: 3_000_000 }],
+    })
+    renderSidebar()
+    await search('platypus')
+    await screen.findByText('Platypus plan')
+    expect(screen.queryByTestId('history-search-semantic-note')).toBeNull()
+    expect(screen.queryByTestId('history-search-related-row')).toBeNull()
+  })
+})
+
 describe('sessionSearchScan', () => {
   it.each([
     [{ scan: { searched: -1, total: 5 } }],
